@@ -1,5 +1,5 @@
 import os, sys
-from typing import BinaryIO, Optional
+from typing import BinaryIO, Optional, Tuple
 import json
 from pathlib import Path
 current_dir = Path(__file__).resolve().parent
@@ -7,6 +7,10 @@ if str(current_dir) not in sys.path:
     sys.path.append(str(current_dir))
 
 from bpe_utils.pretokenize import pretokenize_single_chunk
+from multiprocessing import Pool
+
+N_POOL = 8
+DOC_SPECIAL_TOKEN = b"<|endoftext|>"
 
 
 def find_chunk_boundaries(
@@ -56,30 +60,53 @@ def find_chunk_boundaries(
     return sorted(set(chunk_boundaries))
 
 
+def process_chunk(args: Tuple):
+    file_path, start, end, save_dir, i_chunk, file_name = args
+    with open(file_path, "rb") as f:
+        f.seek(start)
+        chunk = f.read(end - start).decode("utf-8", errors="ignore")
+    # Run pre-tokenization on your chunk and store the counts for each pre-token
+    pretoken_count_dict = pretokenize_single_chunk(chunk, special_token_list=[DOC_SPECIAL_TOKEN])
+    save_file_path = save_dir / f"{file_name}_{i_chunk:06d}.json"
+    with open(save_file_path, "w") as out:
+        json.dump(pretoken_count_dict, out)
+
+
 def main(file_path: Path, save_dir: Optional[Path] = None):
     file_name = file_path.name
     if not save_dir:
         save_dir = current_dir / "tmp"
     os.makedirs(save_dir, exist_ok=True)
+
     ## Usage
     with open(file_path, "rb") as f:
-        num_processes = 4
-        boundaries = find_chunk_boundaries(f, num_processes, b"<|endoftext|>")
+        num_processes = 64
+        boundaries = find_chunk_boundaries(f, num_processes, DOC_SPECIAL_TOKEN)
 
         # The following is a serial implementation, but you can parallelize this
         # by sending each start/end pair to a set of processes.
-        for i_chunk, (start, end) in enumerate(zip(boundaries[:-1], boundaries[1:])):
-            f.seek(start)
-            chunk = f.read(end - start).decode("utf-8", errors="ignore")
-            # Run pre-tokenization on your chunk and store the counts for each pre-token
-            pretoken_count_dict = pretokenize_single_chunk(chunk)
-            save_file_path = save_dir / f"file_name_{i_chunk:06d}.json"
-            with open(save_file_path, "w") as out:
-                json.dump(pretoken_count_dict, out)
+        # for i_chunk, (start, end) in enumerate(zip(boundaries[:-1], boundaries[1:])):
+            # f.seek(start)
+            # chunk = f.read(end - start).decode("utf-8", errors="ignore")
+            # # Run pre-tokenization on your chunk and store the counts for each pre-token
+            # pretoken_count_dict = pretokenize_single_chunk(chunk)
+            # save_file_path = save_dir / f"file_name_{i_chunk:06d}.json"
+            # with open(save_file_path, "w") as out:
+            #     json.dump(pretoken_count_dict, out)
+        
+        # Parallel implementation
+        task = [
+            (file_path, start, end, save_dir, i_chunk, file_name)
+            for i_chunk, (start, end) in enumerate(zip(boundaries[:-1], boundaries[1:]))
+        ]
+        with Pool(N_POOL) as p:
+            p.map(process_chunk, task)
+        
+        print("Completed.")
 
 
 if __name__ == "__main__":
-    test_file_path = Path(__file__).resolve().parent.parent / "data" / "TinyStoriesV2-GPT4-valid.txt"
+    test_file_path = Path(__file__).resolve().parent.parent / "data" / "owt_valid.txt"
     # file_name = test_file_path.name
     # print(file_name)
     # print(type(test_file_path))
