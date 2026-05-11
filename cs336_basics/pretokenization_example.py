@@ -1,5 +1,12 @@
-import os
-from typing import BinaryIO
+import os, sys
+from typing import BinaryIO, Optional
+import json
+from pathlib import Path
+current_dir = Path(__file__).resolve().parent
+if str(current_dir) not in sys.path:
+    sys.path.append(str(current_dir))
+
+from bpe_utils.pretokenize import pretokenize_single_chunk
 
 
 def find_chunk_boundaries(
@@ -49,14 +56,32 @@ def find_chunk_boundaries(
     return sorted(set(chunk_boundaries))
 
 
-## Usage
-with open(..., "rb") as f:
-    num_processes = 4
-    boundaries = find_chunk_boundaries(f, num_processes, b"<|endoftext|>")
+def main(file_path: Path, save_dir: Optional[Path] = None):
+    file_name = file_path.name
+    if not save_dir:
+        save_dir = current_dir / "tmp"
+    os.makedirs(save_dir, exist_ok=True)
+    ## Usage
+    with open(file_path, "rb") as f:
+        num_processes = 4
+        boundaries = find_chunk_boundaries(f, num_processes, b"<|endoftext|>")
 
-    # The following is a serial implementation, but you can parallelize this
-    # by sending each start/end pair to a set of processes.
-    for start, end in zip(boundaries[:-1], boundaries[1:]):
-        f.seek(start)
-        chunk = f.read(end - start).decode("utf-8", errors="ignore")
-        # Run pre-tokenization on your chunk and store the counts for each pre-token
+        # The following is a serial implementation, but you can parallelize this
+        # by sending each start/end pair to a set of processes.
+        for i_chunk, (start, end) in enumerate(zip(boundaries[:-1], boundaries[1:])):
+            f.seek(start)
+            chunk = f.read(end - start).decode("utf-8", errors="ignore")
+            # Run pre-tokenization on your chunk and store the counts for each pre-token
+            pretoken_count_dict = pretokenize_single_chunk(chunk)
+            save_file_path = save_dir / f"file_name_{i_chunk:06d}.json"
+            with open(save_file_path, "w") as out:
+                json.dump(pretoken_count_dict, out)
+
+
+if __name__ == "__main__":
+    test_file_path = Path(__file__).resolve().parent.parent / "data" / "TinyStoriesV2-GPT4-valid.txt"
+    # file_name = test_file_path.name
+    # print(file_name)
+    # print(type(test_file_path))
+    main(test_file_path)
+

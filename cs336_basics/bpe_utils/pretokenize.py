@@ -1,10 +1,13 @@
 import regex as re
-
+from collections import Counter
 
 GPT4_SPLIT_PATTERN = r"""'(?i:[sdmt]|ll|ve|re)|[^\r\n\p{L}\p{N}]?+\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]++[\r\n]*|\s*[\r\n]|\s+(?!\S)|\s+"""
 
 
-def pretokenize_single_chunk(text_chunk, pattern=GPT4_SPLIT_PATTERN):
+def pretokenize_single_chunk(
+    text_chunk: str, 
+    pattern: str = GPT4_SPLIT_PATTERN
+) -> Counter[str]:
     """
         Pretokenize a single text chunk. 
         Output a dictionary of {pretokens: count}.
@@ -17,7 +20,7 @@ def pretokenize_single_chunk(text_chunk, pattern=GPT4_SPLIT_PATTERN):
         pretoken = m.group()
         return_dict[pretoken] = return_dict.get(pretoken, 0) + 1
     
-    return return_dict
+    return Counter(return_dict)
 
 
 if __name__ == "__main__":
