@@ -4,13 +4,13 @@ from collections import Counter
 from typing import Optional, List, BinaryIO, Tuple
 from pathlib import Path
 import json
+import logging
+logger = logging.getLogger(__name__)
 
 current_dir = Path(__file__).resolve().parent
 if str(current_dir) not in sys.path:
     sys.path.append(str(current_dir))
-from multiprocessing import Pool
 
-N_POOL = 8
 DOC_SPECIAL_TOKEN = b"<|endoftext|>"
 GPT4_SPLIT_PATTERN = r"""'(?i:[sdmt]|ll|ve|re)|[^\r\n\p{L}\p{N}]?+\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]++[\r\n]*|\s*[\r\n]|\s+(?!\S)|\s+"""
 
@@ -86,12 +86,15 @@ def find_chunk_boundaries(
 
 
 def process_chunk(args: Tuple):
+    
     file_path, start, end, save_dir, i_chunk, file_name = args
     
     save_file_path = save_dir / f"{file_name}_{i_chunk:06d}.json"
     if os.path.isfile(save_file_path):
         print(f"File ({save_file_path}) exists. Skip processing chunk")
         return
+    
+    logger.info(f"Processing {file_path}")
 
     with open(file_path, "rb") as f:
         f.seek(start)

@@ -2,6 +2,7 @@
     Implement the bpe tokenizer.
 """
 import sys, os
+import psutil
 from pathlib import Path
 CURRENT_DIR = Path(__file__).resolve().parent
 if str(CURRENT_DIR) not in sys.path:
@@ -14,11 +15,12 @@ from multiprocessing import Pool
 from bpe_utils.pretokenize import (
     process_chunk,
     find_chunk_boundaries,
-    DOC_SPECIAL_TOKEN,
-    N_POOL
+    DOC_SPECIAL_TOKEN
 )
 
 RAW_DOCUMENT_DIR = CURRENT_DIR.parent / "data"
+N_POOL = os.cpu_count() - 1
+RAM_MB = psutil.virtual_memory().total // (1024**2)
 
 
 class BPETokenizer:
@@ -38,6 +40,7 @@ class BPETokenizer:
         self.vocab = self._build_vocab()
 
         self.logger = logging.getLogger(__name__)
+        self.logger.info(f"RAM: {RAM_MB} mb")
     
     def _build_vocab(self):
         """
@@ -63,13 +66,23 @@ class BPETokenizer:
 
         for _, document_name in enumerate(raw_document_list):
             document_path = RAW_DOCUMENT_DIR / f"{document_name}"
-            file_prefix = document_name.replace(".txt", "")
+            file_prefix = str(Path(document_name).stem)
             save_dir = RAW_DOCUMENT_DIR / "processed_chunks" / f"{file_prefix}"
             os.makedirs(save_dir, exist_ok=True)
 
             # Process one document
             with open(document_path, "rb") as file:
-                num_processes = 64
+                self.logger.info(f"Pretokenize file: {document_path}")
+
+                file_size = Path(document_path).stat().st_size
+                target_chunk_size = min(512, RAM_MB // (4*4)) * 2 ** 20 # 256 MB chunk
+                num_processes = max(N_POOL * 2, file_size // target_chunk_size)
+                self.logger.info(
+                    f"File size: {file_size / 1024**2 :.02f} mb - "
+                    f"Chunk size: {target_chunk_size / 2**20 :.02f} mb - "
+                    f"N Chunks: {num_processes}"
+                )
+
                 boundaries = find_chunk_boundaries(file, num_processes, DOC_SPECIAL_TOKEN)
 
                 task = [
@@ -82,7 +95,6 @@ class BPETokenizer:
             
             self.logger.info(f"{document_name} has been successfully pre-tokenized.")
 
-
     def train(self):
         raise NotImplementedError
 
@@ -90,7 +102,7 @@ class BPETokenizer:
 if __name__ == "__main__":
     
     bpe_tokenizer = BPETokenizer()
-    print(bpe_tokenizer.vocab)
+
     # Test pre_tokenize
-    # bpe_tokenizer._pre_tokenize_dataset()
-    # pass
+    bpe_tokenizer._pre_tokenize_dataset()
+    pass
