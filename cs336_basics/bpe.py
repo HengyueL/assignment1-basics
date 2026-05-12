@@ -3,9 +3,22 @@
 """
 import sys, os
 from pathlib import Path
-current_dir = Path(__file__).resolve().parent
-if str(current_dir) not in sys.path:
-    sys.path.append(str(current_dir))
+CURRENT_DIR = Path(__file__).resolve().parent
+if str(CURRENT_DIR) not in sys.path:
+    sys.path.append(str(CURRENT_DIR))
+
+import logging
+logging.basicConfig(level=logging.INFO)
+
+from multiprocessing import Pool
+from bpe_utils.pretokenize import (
+    process_chunk,
+    find_chunk_boundaries,
+    DOC_SPECIAL_TOKEN,
+    N_POOL
+)
+
+RAW_DOCUMENT_DIR = CURRENT_DIR.parent / "data"
 
 
 class BPETokenizer:
@@ -13,15 +26,18 @@ class BPETokenizer:
         BPE tokenizer class
     """
     def __init__(self):
-        # default: vocab size of 256 (all bytes), no merges, no patterns
-        # {idx: __repr__()}
-        self.vocab = self._build_vocab()
-
         # Merge rules: (int, int) -> int
         self.merge = {}
 
         # str -> int, e.g. {'<|endoftext|>': 100257}, stored from the end of total vocab
         self.special_tokens = {}
+        self.inverse_special_tokens = {}  # Inverse mapping of special tokens
+
+        # default: vocab size of 256 (all bytes), no merges, no patterns
+        # {idx: __repr__()}
+        self.vocab = self._build_vocab()
+
+        self.logger = logging.getLogger(__name__)
     
     def _build_vocab(self):
         """
@@ -39,5 +55,42 @@ class BPETokenizer:
         
         return vocab
 
+    def _pre_tokenize_dataset(self):
+        assert os.path.isdir(RAW_DOCUMENT_DIR), "Raw document does not exist"
+
+        raw_document_list = [f for f in os.listdir(RAW_DOCUMENT_DIR) if f.endswith(".txt")]
+        self.logger.info(f"Found the following raw document: {raw_document_list}")
+
+        for _, document_name in enumerate(raw_document_list):
+            document_path = RAW_DOCUMENT_DIR / f"{document_name}"
+            file_prefix = document_name.replace(".txt", "")
+            save_dir = RAW_DOCUMENT_DIR / "processed_chunks" / f"{file_prefix}"
+            os.makedirs(save_dir, exist_ok=True)
+
+            # Process one document
+            with open(document_path, "rb") as file:
+                num_processes = 64
+                boundaries = find_chunk_boundaries(file, num_processes, DOC_SPECIAL_TOKEN)
+
+                task = [
+                    (document_path, start, end, save_dir, i_chunk, file_prefix)
+                    for i_chunk, (start, end) in enumerate(zip(boundaries[:-1], boundaries[1:]))
+                ]
+
+                with Pool(N_POOL) as p:
+                    p.map(process_chunk, task)
+            
+            self.logger.info(f"{document_name} has been successfully pre-tokenized.")
+
+
     def train(self):
         raise NotImplementedError
+
+
+if __name__ == "__main__":
+    
+    bpe_tokenizer = BPETokenizer()
+    print(bpe_tokenizer.vocab)
+    # Test pre_tokenize
+    # bpe_tokenizer._pre_tokenize_dataset()
+    # pass
