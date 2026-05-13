@@ -4,6 +4,8 @@ from collections import Counter
 from typing import Optional, List, BinaryIO, Tuple
 from pathlib import Path
 import json
+from multiprocessing import Pool
+import psutil
 import logging
 logger = logging.getLogger(__name__)
 
@@ -11,8 +13,10 @@ current_dir = Path(__file__).resolve().parent
 if str(current_dir) not in sys.path:
     sys.path.append(str(current_dir))
 
-DOC_SPECIAL_TOKEN = b"<|endoftext|>"
+
 GPT4_SPLIT_PATTERN = r"""'(?i:[sdmt]|ll|ve|re)|[^\r\n\p{L}\p{N}]?+\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]++[\r\n]*|\s*[\r\n]|\s+(?!\S)|\s+"""
+N_POOL = os.cpu_count()
+RAM_MB = psutil.virtual_memory().total // (1024**2)
 
 
 def pretokenize_single_chunk(
@@ -26,7 +30,7 @@ def pretokenize_single_chunk(
     """
     if special_token_list:
         for special_token in special_token_list:
-            text_chunk = text_chunk.replace(special_token.decode("utf-8"), " ")
+            text_chunk = text_chunk.replace(special_token, " ")
     
     chunk_iter = re.finditer(pattern, text_chunk)  # Pretokenize iter
     
@@ -87,7 +91,7 @@ def find_chunk_boundaries(
 
 def process_chunk(args: Tuple):
     
-    file_path, start, end, save_dir, i_chunk, file_name = args
+    file_path, start, end, save_dir, i_chunk, file_name, special_token_list = args
     
     save_file_path = save_dir / f"{file_name}_{i_chunk:06d}.json"
     if os.path.isfile(save_file_path):
@@ -100,11 +104,53 @@ def process_chunk(args: Tuple):
         f.seek(start)
         chunk = f.read(end - start).decode("utf-8", errors="ignore")
     # Run pre-tokenization on your chunk and store the counts for each pre-token
-    pretoken_count_dict = pretokenize_single_chunk(chunk, special_token_list=[DOC_SPECIAL_TOKEN])
+    pretoken_count_dict = pretokenize_single_chunk(chunk, special_token_list=special_token_list)
 
     with open(save_file_path, "w") as out:
         json.dump(pretoken_count_dict, out)
     logger.info(f"File saved to: {save_file_path}")
+
+
+def pre_tokenize_document(
+    input_path: str, 
+    output_path: str,
+    document_split_bytes: bytes,
+    special_tokens_list: List[str]
+):
+    assert os.path.isfile(input_path), "Raw document does not exist"
+
+    document_path = Path(input_path)
+    file_prefix = str(Path(document_path).stem)
+    logger.info(f"File prefix: {file_prefix}")
+
+    save_dir = Path(output_path)
+    os.makedirs(save_dir, exist_ok=True)
+
+    # Process one document
+    with open(document_path, "rb") as file:
+        logger.info(f"Pretokenize file: {document_path}")
+
+        file_size = Path(document_path).stat().st_size
+        target_chunk_size = min(512, RAM_MB // (4 * 4 * N_POOL)) * 2 ** 20
+        num_processes = max(1, min(N_POOL * 2, file_size // target_chunk_size))
+
+        logger.info(
+            f"File size: {file_size / 1024**2 :.02f} mb - "
+            f"Chunk size: {target_chunk_size / 2**20 :.02f} mb - "
+            f"N Chunks: {num_processes}"
+        )
+
+        boundaries = find_chunk_boundaries(file, num_processes, document_split_bytes)
+
+        task = [
+            (document_path, start, end, save_dir, i_chunk, file_prefix, special_tokens_list)
+            for i_chunk, (start, end) in enumerate(zip(boundaries[:-1], boundaries[1:]))
+        ]
+
+        with Pool(N_POOL) as p:
+            p.map(process_chunk, task)
+    
+    logger.info(f"{document_path} has been successfully pre-tokenized.")
 
 
 if __name__ == "__main__":

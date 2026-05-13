@@ -2,7 +2,8 @@
     Implement the bpe tokenizer.
 """
 import sys, os
-import psutil
+import json
+from typing import List
 from pathlib import Path
 CURRENT_DIR = Path(__file__).resolve().parent
 if str(CURRENT_DIR) not in sys.path:
@@ -13,31 +14,34 @@ logging.basicConfig(level=logging.INFO)
 
 from multiprocessing import Pool
 from bpe_utils.pretokenize import (
-    process_chunk,
-    find_chunk_boundaries,
-    DOC_SPECIAL_TOKEN
+    pre_tokenize_document,
+    RAM_MB,
+    N_POOL
 )
+from bpe_utils.utils import get_stats
+DOC_SPECIAL_TOKEN = b"<|endoftext|>"
 
-RAW_DOCUMENT_DIR = CURRENT_DIR.parent / "data"
-N_POOL = os.cpu_count()
-RAM_MB = psutil.virtual_memory().total // (1024**2)
 
 
 class BPETokenizer:
     """
         BPE tokenizer class
     """
-    def __init__(self):
-        # Merge rules: (int, int) -> int
-        self.merge = {}
-
+    def __init__(self, vocab_size: int, special_tokens: List[str]):
+        min_vocab_size = 256 + len(special_tokens)
+        assert vocab_size > min_vocab_size, f"Vocab size must > {min_vocab_size}"
+        
+        self.vocab_size = vocab_size
+        
+        
         # str -> int, e.g. {'<|endoftext|>': 100257}, stored from the end of total vocab
         self.special_tokens = {}
         self.inverse_special_tokens = {}  # Inverse mapping of special tokens
+        self._register_special_tokens(special_tokens=special_tokens)  # Use sting
 
-        # default: vocab size of 256 (all bytes), no merges, no patterns
-        # {idx: __repr__()}
-        self.vocab = self._build_vocab()
+        self.merge = {} # Merge rules: (int, int) -> int
+        self.vocab = {} 
+        # self._build_vocab()  # Normal vocab use bytes
 
         self.logger = logging.getLogger(__name__)
         self.logger.info(f"RAM: {RAM_MB} mb - N_THREAD: {N_POOL}")
@@ -50,62 +54,85 @@ class BPETokenizer:
         
         # Merge rules
         for (p0, p1), idx in self.merge.items():
-            self.vocab[idx] = self.vocab[p0] + self.vocab[p1]
+            vocab[idx] = vocab[p0] + vocab[p1]
         
         # Append special characters
         for special_string, idx in self.special_tokens.items():
-            self.vocab[idx] = special_string
+            vocab[idx] = special_string
         
         return vocab
 
-    def _pre_tokenize_dataset(self):
-        assert os.path.isdir(RAW_DOCUMENT_DIR), "Raw document does not exist"
+    def _register_special_tokens(self, special_tokens: list[str]):
+        for idx, special_token in enumerate(special_tokens):
+            self.special_tokens[special_token] = self.vocab_size - idx - 1
+            self.inverse_special_tokens[self.vocab_size - idx - 1] = special_token
 
-        raw_document_list = [f for f in os.listdir(RAW_DOCUMENT_DIR) if f.endswith(".txt")]
-        self.logger.info(f"Found the following raw document: {raw_document_list}")
+    def train(self, pretokenization_path: str):
+        pretokenization_path = Path(pretokenization_path)
+        pretoken_files = [f for f in os.listdir(pretokenization_path) if f.endswith(".json")]
+        self.logger.info(f"Available pretokenized files: {pretoken_files}")
 
-        for _, document_name in enumerate(raw_document_list):
-            document_path = RAW_DOCUMENT_DIR / f"{document_name}"
-            file_prefix = str(Path(document_name).stem)
-            save_dir = RAW_DOCUMENT_DIR / "processed_chunks" / f"{file_prefix}"
-            os.makedirs(save_dir, exist_ok=True)
+        vocab = {idx: bytes([idx]) for idx in range(256)}
+        merge = {}
+        num_merges = self.vocab_size - 256
 
-            # Process one document
-            with open(document_path, "rb") as file:
-                self.logger.info(f"Pretokenize file: {document_path}")
-
-                file_size = Path(document_path).stat().st_size
-                target_chunk_size = min(512, RAM_MB // (4 * 4 * N_POOL)) * 2 ** 20
-                num_processes = max(N_POOL * 2, file_size // target_chunk_size)
-                self.logger.info(
-                    f"File size: {file_size / 1024**2 :.02f} mb - "
-                    f"Chunk size: {target_chunk_size / 2**20 :.02f} mb - "
-                    f"N Chunks: {num_processes}"
-                )
-
-                boundaries = find_chunk_boundaries(file, num_processes, DOC_SPECIAL_TOKEN)
-
-                task = [
-                    (document_path, start, end, save_dir, i_chunk, file_prefix)
-                    for i_chunk, (start, end) in enumerate(zip(boundaries[:-1], boundaries[1:]))
-                ]
-
-                with Pool(N_POOL) as p:
-                    p.map(process_chunk, task)
+        total_doc = {}
+        # Build document chunks and counts
+        for file_idx, file_name in enumerate(pretoken_files):
+            file_path = pretokenization_path / f"{file_name}"
+            with open(file_path, "rb") as file:
+                pretoken_dict = json.load(file)
             
-            self.logger.info(f"{document_name} has been successfully pre-tokenized.")
+            # Main Merge Function
+            for key, value in pretoken_dict.items():
+                # Convert key to tuple of vocab index
+                text_bytes_list = list(key.encode("utf-8"))
+                total_doc[tuple(text_bytes_list)] = value
 
-    def merge(self):
-        raise NotImplementedError
+        vocab_cache = {}
+        for merge_idx in range(num_merges):
+            # Count in cache about (p0, p1) stats
+            for key, value in total_doc.items():
+                vocab_cache = get_stats(key, value, vocab_cache)
+                
+            # Get the most frequet pair
+            pair = max(vocab_cache, key=vocab_cache.get)
+            merge_id = 256 + merge_idx
+            merge[pair] = merge_id
+            vocab[merge_id] = vocab[pair[0]] + vocab[pair[1]]
+            
+            print(pair, merge_id)
+            input()
 
-    def train(self):
-        raise NotImplementedError
+            # Merge
+            for key, value in total_doc.items():
+                # Merge the key if
+                new_key = merge_key(key, pair, new_idx)
+                ...
 
+
+
+def train(input_path: str, vocab_size: int, special_tokens: list[str]):
+    
+    pretokenization_path = Path(input_path).resolve().parent / "processed_chunks"
+    pre_tokenize_document(
+        input_path=input_path,
+        output_path=str(pretokenization_path),
+        document_split_bytes=DOC_SPECIAL_TOKEN,
+        special_tokens_list=special_tokens
+    )
+    bpe_tokenizer = BPETokenizer(
+        vocab_size=vocab_size,
+        special_tokens=special_tokens
+    )
+    print(bpe_tokenizer.vocab)
+    bpe_tokenizer.train(pretokenization_path=pretokenization_path)
 
 if __name__ == "__main__":
     
-    bpe_tokenizer = BPETokenizer()
-
-    # Test pre_tokenize
-    bpe_tokenizer._pre_tokenize_dataset()
+    input_doc_path = CURRENT_DIR.parent / "data" / "TinyStoriesV2-GPT4-valid.txt"
+    vocab_size = 1024
+    special_tokens = [DOC_SPECIAL_TOKEN.decode("utf-8")]
+    
+    train(input_doc_path, vocab_size, special_tokens)
     pass
