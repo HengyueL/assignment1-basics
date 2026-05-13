@@ -19,7 +19,7 @@ from bpe_utils.pretokenize import (
 )
 
 RAW_DOCUMENT_DIR = CURRENT_DIR.parent / "data"
-N_POOL = os.cpu_count() - 1
+N_POOL = min(7, os.cpu_count())
 RAM_MB = psutil.virtual_memory().total // (1024**2)
 
 
@@ -40,7 +40,7 @@ class BPETokenizer:
         self.vocab = self._build_vocab()
 
         self.logger = logging.getLogger(__name__)
-        self.logger.info(f"RAM: {RAM_MB} mb")
+        self.logger.info(f"RAM: {RAM_MB} mb - N_THREAD: {N_POOL}")
     
     def _build_vocab(self):
         """
@@ -75,7 +75,7 @@ class BPETokenizer:
                 self.logger.info(f"Pretokenize file: {document_path}")
 
                 file_size = Path(document_path).stat().st_size
-                target_chunk_size = min(512, RAM_MB // (4*4)) * 2 ** 20 # 256 MB chunk
+                target_chunk_size = min(512, RAM_MB // (4 * 4 * N_POOL)) * 2 ** 20
                 num_processes = max(N_POOL * 2, file_size // target_chunk_size)
                 self.logger.info(
                     f"File size: {file_size / 1024**2 :.02f} mb - "

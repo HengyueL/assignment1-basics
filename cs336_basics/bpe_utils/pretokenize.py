@@ -94,7 +94,7 @@ def process_chunk(args: Tuple):
         print(f"File ({save_file_path}) exists. Skip processing chunk")
         return
     
-    logger.info(f"Processing {file_path}")
+    logger.info(f"Processing {file_path} - Chunk {i_chunk}")
 
     with open(file_path, "rb") as f:
         f.seek(start)
@@ -104,7 +104,7 @@ def process_chunk(args: Tuple):
 
     with open(save_file_path, "w") as out:
         json.dump(pretoken_count_dict, out)
-
+    logger.info(f"File saved to: {save_file_path}")
 
 
 if __name__ == "__main__":
