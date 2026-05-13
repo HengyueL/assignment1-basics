@@ -26,7 +26,7 @@ def pretokenize_single_chunk(
     """
     if special_token_list:
         for special_token in special_token_list:
-            text_chunk = text_chunk.replace(special_token.decode("utf-8"), "")
+            text_chunk = text_chunk.replace(special_token.decode("utf-8"), " ")
     
     chunk_iter = re.finditer(pattern, text_chunk)  # Pretokenize iter
     

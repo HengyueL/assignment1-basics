@@ -19,7 +19,7 @@ from bpe_utils.pretokenize import (
 )
 
 RAW_DOCUMENT_DIR = CURRENT_DIR.parent / "data"
-N_POOL = min(7, os.cpu_count())
+N_POOL = os.cpu_count()
 RAM_MB = psutil.virtual_memory().total // (1024**2)
 
 
@@ -94,6 +94,9 @@ class BPETokenizer:
                     p.map(process_chunk, task)
             
             self.logger.info(f"{document_name} has been successfully pre-tokenized.")
+
+    def merge(self):
+        raise NotImplementedError
 
     def train(self):
         raise NotImplementedError
