@@ -10,6 +10,7 @@ if str(CURRENT_DIR) not in sys.path:
     sys.path.append(str(CURRENT_DIR))
 
 import logging
+import heapq
 logging.basicConfig(level=logging.INFO)
 
 from multiprocessing import Pool
@@ -23,6 +24,23 @@ from bpe_utils.utils import (
     merge_key
 )
 DOC_SPECIAL_TOKEN = b"<|endoftext|>"
+
+
+class _RevBytes:
+    """Wrap bytes with reversed __lt__ so heapq's min-heap breaks ties by lex-greater bytes."""
+    __slots__ = ("b",)
+
+    def __init__(self, b: bytes):
+        self.b = b
+
+    def __lt__(self, other: "_RevBytes") -> bool:
+        return self.b > other.b
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, _RevBytes) and self.b == other.b
+
+    def __hash__(self) -> int:
+        return hash(self.b)
 
 
 class BPETokenizer:
@@ -102,15 +120,27 @@ class BPETokenizer:
                 pair_counts[p] = pair_counts.get(p, 0) + c
                 pair_to_words.setdefault(p, set()).add(word_id)
 
+        # Lazy-deletion max-heap: push on each count change, discard stale entries
+        # (count != pair_counts[p]) when they bubble to the top.
+        heap: list = [
+            (-count, _RevBytes(vocab[p[0]]), _RevBytes(vocab[p[1]]), p)
+            for p, count in pair_counts.items()
+        ]
+        heapq.heapify(heap)
+
         for merge_idx in range(num_merges):
-            if not pair_counts:
+            best_pair = None
+            while heap:
+                neg_count, _, _, p = heap[0]
+                if pair_counts.get(p, 0) == -neg_count:
+                    heapq.heappop(heap)
+                    best_pair = p
+                    break
+                heapq.heappop(heap)
+            if best_pair is None:
                 self.logger.info(f"No pairs left at merge {merge_idx}; stopping early.")
                 break
 
-            best_pair = max(
-                pair_counts,
-                key=lambda p: (pair_counts[p], vocab[p[0]], vocab[p[1]]),
-            )
             merge_id = 256 + merge_idx
             merge[best_pair] = merge_id
             vocab[merge_id] = vocab[best_pair[0]] + vocab[best_pair[1]]
@@ -130,6 +160,10 @@ class BPETokenizer:
                         pair_counts.pop(p, None)
                     else:
                         pair_counts[p] = new_count
+                        heapq.heappush(
+                            heap,
+                            (-new_count, _RevBytes(vocab[p[0]]), _RevBytes(vocab[p[1]]), p),
+                        )
 
                 new_tokens: list[int] = []
                 i, n = 0, len(old_tokens)
@@ -146,7 +180,12 @@ class BPETokenizer:
                 new_pairs: set[tuple[int, int]] = set()
                 for i in range(len(new_tokens) - 1):
                     p = (new_tokens[i], new_tokens[i + 1])
-                    pair_counts[p] = pair_counts.get(p, 0) + c
+                    new_count = pair_counts.get(p, 0) + c
+                    pair_counts[p] = new_count
+                    heapq.heappush(
+                        heap,
+                        (-new_count, _RevBytes(vocab[p[0]]), _RevBytes(vocab[p[1]]), p),
+                    )
                     new_pairs.add(p)
 
                 for p in new_pairs - old_pairs:
