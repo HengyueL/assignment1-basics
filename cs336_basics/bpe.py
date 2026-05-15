@@ -78,41 +78,86 @@ class BPETokenizer:
         vocab = self._build_vocab()
         num_merges = self.vocab_size - 256 - len(self.special_tokens)
 
-        total_doc = {}
-        # Build document chunks and counts
-        for file_idx, file_name in enumerate(pretoken_files):
-            file_path = pretokenization_path / f"{file_name}"
-            with open(file_path, "rb") as file:
-                pretoken_dict = json.load(file)
-            
-            # Main Merge Function
+        aggregated: dict[tuple[int, ...], int] = {}
+        for file_name in pretoken_files:
+            file_path = pretokenization_path / file_name
+            with open(file_path, "rb") as f:
+                pretoken_dict = json.load(f)
             for key, value in pretoken_dict.items():
-                # Convert key to tuple of vocab index
-                text_bytes_list = list(key.encode("utf-8"))
-                total_doc[tuple(text_bytes_list)] = total_doc.get(tuple(text_bytes_list), 0) + value
+                tok = tuple(key.encode("utf-8"))
+                aggregated[tok] = aggregated.get(tok, 0) + value
 
-        
+        # Inverted index pair -> word_ids; each merge visits only the affected words
+        # instead of the whole corpus, dropping cost from O(M*N) to ~O(N + M*k).
+        word_tokens: dict[int, list[int]] = {}
+        word_count: dict[int, int] = {}
+        pair_counts: dict[tuple[int, int], int] = {}
+        pair_to_words: dict[tuple[int, int], set[int]] = {}
+
+        for word_id, (toks, c) in enumerate(aggregated.items()):
+            word_tokens[word_id] = list(toks)
+            word_count[word_id] = c
+            for i in range(len(toks) - 1):
+                p = (toks[i], toks[i + 1])
+                pair_counts[p] = pair_counts.get(p, 0) + c
+                pair_to_words.setdefault(p, set()).add(word_id)
+
         for merge_idx in range(num_merges):
-            vocab_cache = {}
+            if not pair_counts:
+                self.logger.info(f"No pairs left at merge {merge_idx}; stopping early.")
+                break
 
-            # Count in cache about (p0, p1) stats
-            for key, value in total_doc.items():
-                vocab_cache = get_stats(key, value, vocab_cache)
-                
-            # Get the most frequet pair
-            pair = max(vocab_cache, key=lambda p: (vocab_cache[p], vocab[p[0]], vocab[p[1]]))
+            best_pair = max(
+                pair_counts,
+                key=lambda p: (pair_counts[p], vocab[p[0]], vocab[p[1]]),
+            )
             merge_id = 256 + merge_idx
-            merge[pair] = merge_id
-            vocab[merge_id] = vocab[pair[0]] + vocab[pair[1]]
+            merge[best_pair] = merge_id
+            vocab[merge_id] = vocab[best_pair[0]] + vocab[best_pair[1]]
+            a, b = best_pair
 
-            # Merge
-            doc_cache = {}
-            for key, value in total_doc.items():
-                # Merge the key if
-                new_key = merge_key(key, pair, merge_id)
-                doc_cache[new_key] = doc_cache.get(new_key, 0) + value
-            total_doc = doc_cache
-        
+            # Snapshot: the loop body mutates pair_to_words[best_pair].
+            affected = list(pair_to_words.get(best_pair, ()))
+
+            for wid in affected:
+                old_tokens = word_tokens[wid]
+                c = word_count[wid]
+
+                for i in range(len(old_tokens) - 1):
+                    p = (old_tokens[i], old_tokens[i + 1])
+                    new_count = pair_counts.get(p, 0) - c
+                    if new_count <= 0:
+                        pair_counts.pop(p, None)
+                    else:
+                        pair_counts[p] = new_count
+
+                new_tokens: list[int] = []
+                i, n = 0, len(old_tokens)
+                while i < n:
+                    if i + 1 < n and old_tokens[i] == a and old_tokens[i + 1] == b:
+                        new_tokens.append(merge_id)
+                        i += 2
+                    else:
+                        new_tokens.append(old_tokens[i])
+                        i += 1
+                word_tokens[wid] = new_tokens
+
+                old_pairs = {(old_tokens[i], old_tokens[i + 1]) for i in range(len(old_tokens) - 1)}
+                new_pairs: set[tuple[int, int]] = set()
+                for i in range(len(new_tokens) - 1):
+                    p = (new_tokens[i], new_tokens[i + 1])
+                    pair_counts[p] = pair_counts.get(p, 0) + c
+                    new_pairs.add(p)
+
+                for p in new_pairs - old_pairs:
+                    pair_to_words.setdefault(p, set()).add(wid)
+                for p in old_pairs - new_pairs:
+                    idx_set = pair_to_words.get(p)
+                    if idx_set is not None:
+                        idx_set.discard(wid)
+                        if not idx_set:
+                            del pair_to_words[p]
+
         self.merge = merge
         self.vocab = self._build_vocab()
 
