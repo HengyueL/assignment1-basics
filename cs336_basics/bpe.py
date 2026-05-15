@@ -75,6 +75,7 @@ class BPETokenizer:
         self.logger.info(f"Available pretokenized files: {pretoken_files}")
 
         merge = {}
+        vocab = self._build_vocab()
         num_merges = self.vocab_size - 256 - len(self.special_tokens)
 
         total_doc = {}
@@ -99,9 +100,10 @@ class BPETokenizer:
                 vocab_cache = get_stats(key, value, vocab_cache)
                 
             # Get the most frequet pair
-            pair = max(vocab_cache, key=lambda p: (vocab_cache[p], p[0], p[1]))
+            pair = max(vocab_cache, key=lambda p: (vocab_cache[p], vocab[p[0]], vocab[p[1]]))
             merge_id = 256 + merge_idx
             merge[pair] = merge_id
+            vocab[merge_id] = vocab[pair[0]] + vocab[pair[1]]
 
             # Merge
             doc_cache = {}

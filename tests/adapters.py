@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import os
+import os, sys
 from collections.abc import Iterable
 from typing import IO, Any, BinaryIO
 
@@ -8,6 +8,13 @@ import numpy.typing as npt
 import torch
 from jaxtyping import Bool, Float, Int
 from torch import Tensor
+
+
+from pathlib import Path
+CURRENT_DIR = Path(__file__).resolve().parent
+if str(CURRENT_DIR) not in sys.path:
+    sys.path.append(str(CURRENT_DIR))
+    sys.path.append(str(CURRENT_DIR.parent / "cs336_basics"))
 
 
 def run_linear(
@@ -589,4 +596,7 @@ def run_train_bpe(
                 representing that <token1> was merged with <token2>.
                 Merges are ordered by order of creation.
     """
-    raise NotImplementedError
+    from bpe import train as bpe_train
+    return bpe_train(
+        input_path, vocab_size, special_tokens
+    )
