@@ -13,7 +13,7 @@ current_dir = Path(__file__).resolve().parent
 if str(current_dir) not in sys.path:
     sys.path.append(str(current_dir))
 
-
+GPT2_SPLIT_PATTERN = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 GPT4_SPLIT_PATTERN = r"""'(?i:[sdmt]|ll|ve|re)|[^\r\n\p{L}\p{N}]?+\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]++[\r\n]*|\s*[\r\n]|\s+(?!\S)|\s+"""
 N_POOL = os.cpu_count()
 RAM_MB = psutil.virtual_memory().total // (1024**2)
@@ -22,23 +22,24 @@ RAM_MB = psutil.virtual_memory().total // (1024**2)
 def pretokenize_single_chunk(
     text_chunk: str, 
     special_token_list: Optional[List[str]] = None,
-    pattern: str = GPT4_SPLIT_PATTERN
+    pattern: str = GPT2_SPLIT_PATTERN
 ) -> Counter[str]:
     """
         Pretokenize a single text chunk. 
         Output a dictionary of {pretokens: count}.
     """
     if special_token_list:
-        for special_token in special_token_list:
-            text_chunk = text_chunk.replace(special_token, " ")
-    
-    chunk_iter = re.finditer(pattern, text_chunk)  # Pretokenize iter
-    
+        split_pattern = "|".join(re.escape(st) for st in special_token_list)
+        segments = re.split(split_pattern, text_chunk)
+    else:
+        segments = [text_chunk]
+
     return_dict = {}
-    for m in chunk_iter:
-        pretoken = m.group()
-        return_dict[pretoken] = return_dict.get(pretoken, 0) + 1
-    
+    for segment in segments:
+        for m in re.finditer(pattern, segment):
+            pretoken = m.group()
+            return_dict[pretoken] = return_dict.get(pretoken, 0) + 1
+
     return Counter(return_dict)
 
 

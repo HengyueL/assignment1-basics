@@ -18,5 +18,16 @@ def get_stats(
     return counts
 
 
-def merge_key(key: Tuple, pair: Tuple, idx: int):
-    ...
+def merge_key(key: Tuple, pair: Tuple, merge_id: int):
+    new_id_list = []
+    idx = 0
+
+    while idx < len(key):
+        if key[idx] == pair[0] and idx < len(key) - 1 and key[idx + 1] == pair[1]:
+            new_id_list.append(merge_id)
+            idx += 2
+        else:
+            new_id_list.append(key[idx])
+            idx += 1
+    
+    return tuple(new_id_list)
