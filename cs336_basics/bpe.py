@@ -17,7 +17,8 @@ from multiprocessing import Pool
 from bpe_utils.pretokenize import (
     pre_tokenize_document,
     RAM_MB,
-    N_POOL
+    N_POOL,
+    GPT2_SPLIT_PATTERN
 )
 from bpe_utils.utils import (
     get_stats,
@@ -52,7 +53,7 @@ class BPETokenizer:
         assert vocab_size > min_vocab_size, f"Vocab size must > {min_vocab_size}"
         
         self.vocab_size = vocab_size
-        
+        self.pattern = GPT2_SPLIT_PATTERN
         
         # str -> int, e.g. {'<|endoftext|>': 100257}, stored from the end of total vocab
         self.special_tokens = {}
@@ -86,9 +87,24 @@ class BPETokenizer:
         for idx, special_token in enumerate(special_tokens):
             self.special_tokens[special_token] = self.vocab_size - idx - 1
             self.inverse_special_tokens[self.vocab_size - idx - 1] = special_token
+    
+    def _pretokenize_train(self, input_path: str, pretokenization_path: Path):
+        pre_tokenize_document(
+            input_path=input_path,
+            output_path=str(pretokenization_path),
+            document_split_bytes=DOC_SPECIAL_TOKEN,
+            special_tokens_list=list(self.special_tokens.keys())
+        )
 
-    def train(self, pretokenization_path: str, file_prefix: str):
+
+    def train(self, input_path:str, pretokenization_path: str, file_prefix: str):
         pretokenization_path = Path(pretokenization_path)
+        
+        # Pretokenization
+        self._pretokenize_train(
+            input_path, pretokenization_path
+        )
+
         pretoken_files = [f for f in os.listdir(pretokenization_path) if f.endswith(".json") and f.startswith(file_prefix)]
         self.logger.info(f"Available pretokenized files: {pretoken_files}")
 
@@ -207,18 +223,13 @@ def train(input_path: str, vocab_size: int, special_tokens: list[str]):
     file_prefix = input_path.resolve().stem
     pretokenization_path = input_path.resolve().parent / "processed_chunks"
 
-    pre_tokenize_document(
-        input_path=input_path,
-        output_path=str(pretokenization_path),
-        document_split_bytes=DOC_SPECIAL_TOKEN,
-        special_tokens_list=special_tokens
-    )
     bpe_tokenizer = BPETokenizer(
         vocab_size=vocab_size,
         special_tokens=special_tokens
     )
 
     bpe_tokenizer.train(
+        input_path=input_path,
         pretokenization_path=pretokenization_path,
         file_prefix=file_prefix
     )
