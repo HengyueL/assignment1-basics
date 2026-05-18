@@ -92,7 +92,7 @@ def find_chunk_boundaries(
 
 def process_chunk(args: Tuple):
     
-    file_path, start, end, save_dir, i_chunk, file_name, special_token_list = args
+    file_path, start, end, save_dir, i_chunk, file_name, special_token_list, pattern = args
     
     save_file_path = save_dir / f"{file_name}_{i_chunk:06d}.json"
     if os.path.isfile(save_file_path):
@@ -105,18 +105,36 @@ def process_chunk(args: Tuple):
         f.seek(start)
         chunk = f.read(end - start).decode("utf-8", errors="ignore")
     # Run pre-tokenization on your chunk and store the counts for each pre-token
-    pretoken_count_dict = pretokenize_single_chunk(chunk, special_token_list=special_token_list)
+    pretoken_count_dict = pretokenize_single_chunk(
+        chunk, special_token_list=special_token_list,
+        pattern=pattern
+    )
 
     with open(save_file_path, "w") as out:
         json.dump(pretoken_count_dict, out)
     logger.info(f"File saved to: {save_file_path}")
 
 
+def divide_doc_chunks(
+    document_path: Path
+):
+    file_size = document_path.stat().st_size
+    target_chunk_size = min(512, RAM_MB // (4 * 4 * N_POOL)) * 2 ** 20
+    num_chunks = max(1, file_size // target_chunk_size)
+    logger.info(
+        f"File size: {file_size / 1024**2 :.02f} mb - "
+        f"Chunk size: {target_chunk_size / 2**20 :.02f} mb - "
+        f"N Chunks: {num_chunks}"
+    )
+    return num_chunks
+
+
 def pre_tokenize_document(
     input_path: str, 
     output_path: str,
     document_split_bytes: bytes,
-    special_tokens_list: List[str]
+    special_tokens_list: List[str],
+    split_pattern: str
 ):
     assert os.path.isfile(input_path), "Raw document does not exist"
 
@@ -131,20 +149,11 @@ def pre_tokenize_document(
     with open(document_path, "rb") as file:
         logger.info(f"Pretokenize file: {document_path}")
 
-        file_size = Path(document_path).stat().st_size
-        target_chunk_size = min(512, RAM_MB // (4 * 4 * N_POOL)) * 2 ** 20
-        num_processes = max(1, min(N_POOL * 2, file_size // target_chunk_size))
-
-        logger.info(
-            f"File size: {file_size / 1024**2 :.02f} mb - "
-            f"Chunk size: {target_chunk_size / 2**20 :.02f} mb - "
-            f"N Chunks: {num_processes}"
-        )
-
-        boundaries = find_chunk_boundaries(file, num_processes, document_split_bytes)
+        num_chunks = divide_doc_chunks(document_path)
+        boundaries = find_chunk_boundaries(file, num_chunks, document_split_bytes)
 
         task = [
-            (document_path, start, end, save_dir, i_chunk, file_prefix, special_tokens_list)
+            (document_path, start, end, save_dir, i_chunk, file_prefix, special_tokens_list, split_pattern)
             for i_chunk, (start, end) in enumerate(zip(boundaries[:-1], boundaries[1:]))
         ]
 

@@ -48,3 +48,10 @@ gunzip owt_valid.txt.gz
 cd ..
 ```
 
+## Other useful links
+
+1. [Other's notes for this assignment](https://github.com/Melody-Zhou/stanford-cs336-spring2025-assignments)
+
+2. [Karpathy minbpe reference](https://github.com/karpathy/minbpe/blob/master/minbpe/regex.py)
+
+3. [Course Youtube](https://www.youtube.com/watch?v=ptFiH_bHnJw&list=PLoROMvodv4rOY23Y0BoGoBGgQ1zmU_MT_)
