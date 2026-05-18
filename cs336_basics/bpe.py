@@ -3,6 +3,7 @@
 """
 import sys, os
 import json
+import codecs
 from typing import List
 from pathlib import Path
 CURRENT_DIR = Path(__file__).resolve().parent
@@ -332,8 +333,17 @@ class BPETokenizer:
                 np.array(self._tokenize_chunk(buffer[:safe_cut]), dtype=np.uint16).tofile(f_out)
                 leftover = buffer[safe_cut:]
                     
-    def decode(self):
-        raise NotImplementedError
+    def decode(self, input_path: str, output_path: str):
+        assert os.path.isfile(input_path), "Encoding file to decode does not exist."
+        assert input_path.endswith("_encoding.lib"), "Encoding file should end with _encoding.lib"
+        
+        embeddings = np.memmap(input_path, dtype=np.uint16, mode="r")
+        decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        with open(output_path, "w", encoding="utf-8") as file:
+            for token_id in embeddings:
+                chunk = self.vocab[int(token_id)]
+                file.write(decoder.decode(chunk, final=False))
+            file.write(decoder.decode(b"", final=True))
     
     def save(self, file_prefix):
         """
@@ -431,7 +441,6 @@ def train(input_path: str, vocab_size: int, special_tokens: list[str]):
     ]
     return vocab, merge
 
-
 def encode(input_path: str, tokenizer_model_file: str):
     bpe_tokenizer = BPETokenizer(
         vocab_size=vocab_size,
@@ -444,7 +453,19 @@ def encode(input_path: str, tokenizer_model_file: str):
         input_path=input_path,
         output_path=output_path
     )
-    print("Test Encoding Completed.")
+    print("Encoding Completed.")
+
+def decode(input_path: str, tokenizer_model_file: str):
+    bpe_tokenizer = BPETokenizer(
+        vocab_size=vocab_size,
+        special_tokens=special_tokens
+    )
+    bpe_tokenizer.load(tokenizer_model_file)
+
+    output_path = input_path.replace("encoding.lib", "decoded.txt")
+    bpe_tokenizer.decode(input_path, output_path)
+    print("Decoding Completed.")
+
 
 
 if __name__ == "__main__":
@@ -454,9 +475,11 @@ if __name__ == "__main__":
     special_tokens = [DOC_SPECIAL_TOKEN.decode("utf-8")]
 
     tokenizer_model_path = "MyModel.model"
-    
     # train(input_doc_path, vocab_size, special_tokens)
 
-    encode_test_input_path = CURRENT_DIR.parent / "data" / "owt_valid.txt"
-    encode(str(input_doc_path), tokenizer_model_path)
+    # encode_test_input_path = CURRENT_DIR.parent / "data" / "owt_valid.txt"
+    # encode(str(input_doc_path), tokenizer_model_path)
+
+    decode_test_input_path = "TinyStoriesV2-GPT4-valid_encoding.lib"
+    decode(decode_test_input_path, tokenizer_model_path)
     pass
