@@ -35,8 +35,16 @@ def run_linear(
     Returns:
         Float[Tensor, "... d_out"]: The transformed output of your linear module.
     """
-
-    raise NotImplementedError
+    from cs336_basics.transformer_utils.linear import Linear
+    import torch.nn as nn
+    
+    linear_layer = Linear(
+        in_features=d_in,
+        out_features=d_out
+    )
+    linear_layer.weights = nn.Parameter(weights)
+    
+    return linear_layer(in_features)
 
 
 def run_embedding(
