@@ -40,10 +40,9 @@ def run_linear(
     
     linear_layer = Linear(
         in_features=d_in,
-        out_features=d_out
+        out_features=d_out,
+        weights=weights
     )
-    linear_layer.weights = nn.Parameter(weights)
-    
     return linear_layer(in_features)
 
 
@@ -71,9 +70,7 @@ def run_embedding(
     embedding_layer = Embedding(
         num_embeddings=vocab_size,
         embedding_dim=d_model,
-    )
-    embedding_layer.weights = nn.Parameter(
-        data=weights
+        weights=weights
     )
     return embedding_layer(token_ids)
 
@@ -402,7 +399,14 @@ def run_rmsnorm(
         Float[Tensor,"... d_model"]: Tensor of with the same shape as `in_features` with the output of running
         RMSNorm of the `in_features`.
     """
-    raise NotImplementedError
+    from cs336_basics.transformer_utils.rmsnorm import RMSNorm
+    import torch.nn as nn
+    rms_norm = RMSNorm(
+        d_model=d_model,
+        eps=eps,
+        weights=weights
+    )
+    return rms_norm(in_features)
 
 
 def run_silu(in_features: Float[Tensor, " ..."]) -> Float[Tensor, " ..."]:
