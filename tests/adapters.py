@@ -104,7 +104,15 @@ def run_swiglu(
     # swiglu.w1.weight.data = w1_weight
     # swiglu.w2.weight.data = w2_weight
     # swiglu.w3.weight.data = w3_weight
-    raise NotImplementedError
+    from cs336_basics.transformer_utils.swiglu import SwiGLU
+    swiglu = SwiGLU(
+        d_model=d_model,
+        d_ff=d_ff,
+        w1=w1_weight,
+        w2=w2_weight.T,
+        w3=w3_weight
+    )
+    return swiglu(in_features)
 
 
 def run_scaled_dot_product_attention(
@@ -617,7 +625,7 @@ def run_train_bpe(
                 representing that <token1> was merged with <token2>.
                 Merges are ordered by order of creation.
     """
-    from bpe import train as bpe_train
+    from cs336_basics.bpe import train as bpe_train
     return bpe_train(
         input_path, vocab_size, special_tokens
     )
