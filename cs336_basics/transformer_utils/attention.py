@@ -1,7 +1,7 @@
 import torch.nn as nn
 import torch
 from einops import einsum
-from softmax import SoftMax
+from .softmax import SoftMax
 
 
 class ScaledDotProductAttention(nn.Module):
