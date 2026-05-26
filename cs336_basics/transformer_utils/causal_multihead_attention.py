@@ -55,12 +55,13 @@ class MultiheadAttention(nn.Module):
         q = rearrange(q, "... n_seq (num_heads d) -> ... num_heads n_seq d", num_heads=self.num_heads)
         v = rearrange(v, "... n_seq (num_heads d) -> ... num_heads n_seq d", num_heads=self.num_heads)
 
-        if getattr(self, "rope", None) and positions is not None:
+        n_seq = x.shape[-2]
+        if getattr(self, "rope", None):
+            if positions is None:
+                positions = torch.arange(n_seq, device=x.device)
             positions = positions.unsqueeze(-2)
             q = self.rope(q, positions)
             k = self.rope(k, positions)
-        
-        n_seq = x.shape[-2]
         mask = torch.ones(n_seq, n_seq, device=self.device).tril()
 
         multi_head_attention = rearrange(
