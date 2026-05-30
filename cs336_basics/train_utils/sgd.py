@@ -13,7 +13,7 @@ class SGD(Optimizer):
     """
         A learning rate decayed SGD optimizer
     """
-    def __int__(self, params, lr=1e-3):
+    def __init__(self, params, lr=1e-3):
         assert lr > 0, f"Invalid learning rate: {lr}"
         defaults = {"lr": lr}
         super().__init__(params, defaults)
@@ -38,3 +38,15 @@ class SGD(Optimizer):
         return loss
     
 
+if __name__ == "__main__":
+    weights = torch.nn.Parameter(
+        5 * torch.randn(size=[10, 10])
+    )
+    opt = SGD([weights], lr=1)
+
+    for t in range(10):
+        opt.zero_grad()
+        loss = (weights**2).mean()
+        print(loss.cpu().item())
+        loss.backward()
+        opt.step()
