@@ -1,5 +1,5 @@
 from torch.optim import Optimizer
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 import torch
 import math
 from typing import Optional
