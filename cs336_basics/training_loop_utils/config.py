@@ -56,6 +56,8 @@ class OptimizerConfig:
 
 @dataclass
 class TrainingCofing:
+    seed: int = 42
+    
     max_step: int = 10_000
     batch_size: int = 64
 
